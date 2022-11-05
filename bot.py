@@ -7,6 +7,8 @@ import os
 import re
 from datetime import datetime
 import pytz
+import redis
+from redis.commands.json.path import Path
 import json
 
 load_dotenv(".env")
@@ -14,6 +16,10 @@ load_dotenv(".env")
 app = FastAPI()
 
 client = WebClient(token=os.getenv("SLACK_BOT_TOKEN"))
+redis_client = redis.from_url(
+    url=os.getenv("REDIS_URL"),
+    password=os.getenv("REDIS_PASSWORD"),
+)
 
 
 def get_command_data(cmd_data: List) -> dict:
@@ -46,7 +52,6 @@ async def message_members_channels(
     raw_body = await request.body()
     body = raw_body.decode("utf-8")
     command_data = [unquote(text) for text in body.split("&")]
-    print(command_data)
     data_dict = get_command_data(command_data)
     channels_users = get_channels_and_users(data_dict["text"])
     message = get_message(data_dict["text"])
@@ -57,6 +62,9 @@ async def message_members_channels(
                 client.chat_postMessage(channel=member, text=message, as_user=True)
         else:
             client.chat_postMessage(channel=entity[1], text=message, as_user=True)
+    redis_client.json().set(
+        name=f"{str(datetime.now())}", path=Path.root_path(), obj=data_dict
+    )
     return {"Status": "Success"}
 
 
@@ -84,6 +92,9 @@ async def schedule_message(request: Request, response: Response, data=Body(...))
             client.chat_scheduleMessage(
                 channel=entity[1], text=message, post_at=time_epoch
             )
+    redis_client.json().set(
+        name=f"{str(datetime.now())}", path=Path.root_path(), obj=data_dict
+    )
     return {"Status": "Success"}
 
 
@@ -119,6 +130,9 @@ async def schedule_message_in_user_timzone(
             client.chat_scheduleMessage(
                 channel=entity[1], text=message, post_at=time_epoch
             )
+    redis_client.json().set(
+        name=f"{str(datetime.now())}", path=Path.root_path(), obj=data_dict
+    )
     return {"Status": "Success"}
 
 
@@ -126,9 +140,7 @@ async def schedule_message_in_user_timzone(
 async def schedule_message_in_user_timzone(
     request: Request, response: Response, data=Body(...)
 ):
-    raw_body = await request.body()
     raw_form = await request.form()
-    body = unquote(raw_body.decode("utf-8"))
     payload = json.loads(raw_form.get("payload"))
     resp = client.views_open(
         trigger_id=payload["trigger_id"],
